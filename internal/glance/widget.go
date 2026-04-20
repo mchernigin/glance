@@ -128,6 +128,7 @@ type widget interface {
 	Render() template.HTML
 	GetType() string
 	GetID() uint64
+	IsStale() bool
 
 	initialize() error
 	requiresUpdate(*time.Time) bool
@@ -184,6 +185,11 @@ func (w *widgetBase) requiresUpdate(now *time.Time) bool {
 
 func (w *widgetBase) IsWIP() bool {
 	return w.WIP
+}
+
+func (w *widgetBase) IsStale() bool {
+	now := time.Now()
+	return w.ContentAvailable && w.requiresUpdate(&now)
 }
 
 func (w *widgetBase) update(ctx context.Context) {

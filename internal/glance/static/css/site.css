@@ -303,6 +303,19 @@ kbd:active {
     stroke: var(--color-text-highlight);
 }
 
+.widget-header-spinner {
+    display: none;
+    min-width: 1.2rem;
+    width: 1.2rem;
+    height: 1.2rem;
+    border-width: 0.2rem;
+    margin-left: auto;
+}
+
+.widget-updating .widget-header-spinner {
+    display: block;
+}
+
 .footer {
     padding-bottom: calc(var(--widget-gap) * 1.5);
     padding-top: calc(var(--widget-gap) / 2);

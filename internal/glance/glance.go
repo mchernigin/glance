@@ -38,6 +38,7 @@ type application struct {
 
 	slugToPage map[string]*page
 	widgetByID map[uint64]widget
+	widgetPage map[uint64]*page
 
 	RequiresAuth           bool
 	authSecretKey          []byte
@@ -53,6 +54,7 @@ func newApplication(c *config) (*application, error) {
 		Config:     *c,
 		slugToPage: make(map[string]*page),
 		widgetByID: make(map[uint64]widget),
+		widgetPage: make(map[uint64]*page),
 	}
 	config := &app.Config
 
@@ -177,6 +179,7 @@ func newApplication(c *config) (*application, error) {
 		for i := range page.HeadWidgets {
 			widget := page.HeadWidgets[i]
 			app.widgetByID[widget.GetID()] = widget
+			app.widgetPage[widget.GetID()] = page
 			widget.setProviders(providers)
 		}
 
@@ -190,6 +193,7 @@ func newApplication(c *config) (*application, error) {
 			for w := range column.Widgets {
 				widget := column.Widgets[w]
 				app.widgetByID[widget.GetID()] = widget
+				app.widgetPage[widget.GetID()] = page
 				widget.setProviders(providers)
 			}
 		}
@@ -333,6 +337,39 @@ func (a *application) handlePageRequest(w http.ResponseWriter, r *http.Request) 
 	w.Write(responseBytes.Bytes())
 }
 
+func (a *application) updateMissingWidgets(page *page) {
+	page.mu.Lock()
+	defer page.mu.Unlock()
+
+	now := time.Now()
+	context := context.Background()
+	var wg sync.WaitGroup
+
+	updateWidget := func(widget widget) {
+		if !widget.requiresUpdate(&now) || widget.IsStale() {
+			return
+		}
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			widget.update(context)
+		}()
+	}
+
+	for w := range page.HeadWidgets {
+		updateWidget(page.HeadWidgets[w])
+	}
+
+	for c := range page.Columns {
+		for w := range page.Columns[c].Widgets {
+			updateWidget(page.Columns[c].Widgets[w])
+		}
+	}
+
+	wg.Wait()
+}
+
 func (a *application) handlePageContentRequest(w http.ResponseWriter, r *http.Request) {
 	page, exists := a.slugToPage[r.PathValue("page")]
 	if !exists {
@@ -351,11 +388,11 @@ func (a *application) handlePageContentRequest(w http.ResponseWriter, r *http.Re
 	var err error
 	var responseBytes bytes.Buffer
 
+	a.updateMissingWidgets(page)
+
 	func() {
 		page.mu.Lock()
 		defer page.mu.Unlock()
-
-		page.updateOutdatedWidgets()
 		err = pageContentTemplate.Execute(&responseBytes, pageData)
 	}()
 
@@ -434,26 +471,40 @@ func (a *application) handleCacheFlushRequest(w http.ResponseWriter, r *http.Req
 }
 
 func (a *application) handleWidgetRequest(w http.ResponseWriter, r *http.Request) {
-	// TODO: this requires a rework of the widget update logic so that rather
-	// than locking the entire page we lock individual widgets
-	w.WriteHeader(http.StatusNotImplemented)
+	widgetValue := r.PathValue("widget")
 
-	// widgetValue := r.PathValue("widget")
+	widgetID, err := strconv.ParseUint(widgetValue, 10, 64)
+	if err != nil {
+		a.handleNotFound(w, r)
+		return
+	}
 
-	// widgetID, err := strconv.ParseUint(widgetValue, 10, 64)
-	// if err != nil {
-	// 	a.handleNotFound(w, r)
-	// 	return
-	// }
+	widget, exists := a.widgetByID[widgetID]
+	if !exists {
+		a.handleNotFound(w, r)
+		return
+	}
 
-	// widget, exists := a.widgetByID[widgetID]
+	page, exists := a.widgetPage[widgetID]
+	if !exists {
+		a.handleNotFound(w, r)
+		return
+	}
 
-	// if !exists {
-	// 	a.handleNotFound(w, r)
-	// 	return
-	// }
+	if a.handleUnauthorizedResponse(w, r, showUnauthorizedJSON) {
+		return
+	}
 
-	// widget.handleRequest(w, r)
+	page.mu.Lock()
+	defer page.mu.Unlock()
+
+	now := time.Now()
+	if widget.requiresUpdate(&now) {
+		widget.update(r.Context())
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	w.Write([]byte(widget.Render()))
 }
 
 func (a *application) StaticAssetPath(asset string) string {
@@ -472,13 +523,13 @@ func (a *application) server() (func() error, func() error) {
 	mux.HandleFunc("GET /{page}", a.handlePageRequest)
 
 	mux.HandleFunc("GET /api/pages/{page}/content/{$}", a.handlePageContentRequest)
+	mux.HandleFunc("GET /api/widgets/{widget}", a.handleWidgetRequest)
 	mux.HandleFunc("POST /api/flush-cache", a.handleCacheFlushRequest)
 
 	if !a.Config.Theme.DisablePicker {
 		mux.HandleFunc("POST /api/set-theme/{key}", a.handleThemeChangeRequest)
 	}
 
-	mux.HandleFunc("/api/widgets/{widget}/{path...}", a.handleWidgetRequest)
 	mux.HandleFunc("GET /api/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
