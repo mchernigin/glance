@@ -125,6 +125,8 @@ func serveApp(configPath string) error {
 			return
 		}
 
+		app.ConfigPath = configPath
+
 		if !hadValidConfigOnStartup {
 			hadValidConfigOnStartup = true
 		}

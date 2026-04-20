@@ -286,6 +286,23 @@ kbd:active {
     line-height: var(--header-height);
 }
 
+.header-action-button {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 2rem;
+    width: 2rem;
+    padding: 0;
+    border: 0;
+    background: transparent;
+    cursor: pointer;
+}
+
+.header-action-button:hover .ui-icon,
+.header-action-button:focus-visible .ui-icon {
+    stroke: var(--color-text-highlight);
+}
+
 .footer {
     padding-bottom: calc(var(--widget-gap) * 1.5);
     padding-top: calc(var(--widget-gap) / 2);

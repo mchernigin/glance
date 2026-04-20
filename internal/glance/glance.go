@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"path/filepath"
 	"slices"
 	"strconv"
@@ -28,9 +29,10 @@ const STATIC_ASSETS_CACHE_DURATION = 24 * time.Hour
 var reservedPageSlugs = []string{"login", "logout"}
 
 type application struct {
-	Version   string
-	CreatedAt time.Time
-	Config    config
+	Version    string
+	CreatedAt  time.Time
+	Config     config
+	ConfigPath string
 
 	parsedManifest []byte
 
@@ -401,6 +403,36 @@ func (a *application) handleNotFound(w http.ResponseWriter, _ *http.Request) {
 	w.Write([]byte("Page not found"))
 }
 
+func (a *application) handleCacheFlushRequest(w http.ResponseWriter, r *http.Request) {
+	if a.handleUnauthorizedResponse(w, r, showUnauthorizedJSON) {
+		return
+	}
+
+	if a.ConfigPath == "" {
+		http.Error(w, "config path unavailable", http.StatusInternalServerError)
+		return
+	}
+
+	contents, err := os.ReadFile(a.ConfigPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	stat, err := os.Stat(a.ConfigPath)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	if err := os.WriteFile(a.ConfigPath, contents, stat.Mode().Perm()); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
 func (a *application) handleWidgetRequest(w http.ResponseWriter, r *http.Request) {
 	// TODO: this requires a rework of the widget update logic so that rather
 	// than locking the entire page we lock individual widgets
@@ -440,6 +472,7 @@ func (a *application) server() (func() error, func() error) {
 	mux.HandleFunc("GET /{page}", a.handlePageRequest)
 
 	mux.HandleFunc("GET /api/pages/{page}/content/{$}", a.handlePageContentRequest)
+	mux.HandleFunc("POST /api/flush-cache", a.handleCacheFlushRequest)
 
 	if !a.Config.Theme.DisablePicker {
 		mux.HandleFunc("POST /api/set-theme/{key}", a.handleThemeChangeRequest)

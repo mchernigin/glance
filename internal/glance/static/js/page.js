@@ -691,6 +691,40 @@ async function changeTheme(key, onChanged) {
     setTimeout(() => { tempStyle.remove(); }, 10);
 }
 
+async function flushCache() {
+    const response = await fetch(`${pageData.baseURL}/api/flush-cache`, {
+        method: "POST",
+    });
+
+    if (response.status != 204) {
+        alert("Failed to flush cache");
+        return;
+    }
+
+    setTimeout(() => { window.location.reload(); }, 1000);
+}
+
+function initFlushCacheButton() {
+    const button = document.getElementById("flush-cache-button");
+    if (!button) return;
+
+    let isLoading = false;
+    button.addEventListener("click", async () => {
+        if (isLoading) return;
+        isLoading = true;
+        button.disabled = true;
+
+        try {
+            await flushCache();
+        } finally {
+            setTimeout(() => {
+                isLoading = false;
+                button.disabled = false;
+            }, 1500);
+        }
+    });
+}
+
 function initThemePicker() {
     const themeChoicesInMobileNav = find(".mobile-navigation .theme-choices");
     if (!themeChoicesInMobileNav) return;
@@ -744,6 +778,7 @@ function initThemePicker() {
 }
 
 async function setupPage() {
+    initFlushCacheButton();
     initThemePicker();
 
     const pageElement = document.getElementById("page");
